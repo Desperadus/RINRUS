@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rinrus"
+version = "0.1.0"
+description = "Residue Interaction Network ResidUe Selector"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {file = "LICENSE"}
+authors = [
+  {name = "Nathan DeYonker Group", email = "ndeyonker@memphis.edu"},
+]
+dependencies = [
+  "numpy",
+  "pandas",
+  "biopython",
+]
+
+[project.scripts]
+rinrus = "rinrus.cli:main"
+
+[tool.setuptools]
+packages = ["rinrus"]

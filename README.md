@@ -18,6 +18,16 @@ Prof. Nathan DeYonker, Department of Chemistry, University of Memphis at ndyonke
 
 ## Installation
 
+Recommended (mamba):
+```bash
+git clone https://github.com/natedey/RINRUS.git
+cd RINRUS
+mamba env create -f env.yml
+mamba activate rinrus
+```
+This installs a `rinrus` CLI that sets up paths for you.
+
+Manual (no conda):
 Clone this repository, then add `bin` to your `PATH` and library code under `lib3` to your `PYTHONPATH`. For example, in `~/git`:
 ``` bash
 cd ~/git
@@ -70,6 +80,11 @@ Further preprocessing of ligands likely required!
 ## How to use
 
 The entire processed-PDB-to-input-file RINRUS workflow can be run at once using the driver, or steps can be run individually.
+
+Quick start with the CLI (no `rinrus.inp` file needed):
+```bash
+rinrus driver --pdb 3bwm_h.pdb --seed A:300,A:301,A:302 --rin-program probe --model max --qm-input-format gaussian
+```
 
 Full usage instructions are described in [bin/](bin/README.md).
 

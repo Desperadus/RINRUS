@@ -11,7 +11,10 @@ The driver runs the entire RINRUS model building procedure from initial PDB stru
 
 ```bash
 # Usage of the RINRUS driver
-python $HOME/git/RINRUS/bin/RINRUS_driver.py -i rinrus.inp
+rinrus driver --pdb PDB.pdb --seed A:300,A:301,A:302 --rin-program probe --model max --qm-input-format gaussian
+
+# Or use an input file
+rinrus driver -i rinrus.inp
 
 # Arguments:
 -i FILE    rinrus driver input file (default: rinrus.inp)
@@ -477,4 +480,3 @@ python3 $HOME/git/RINRUS/bin/xyz_to_pdb.py -xyz orca.xyz -pdb model_N_template.p
 -name SAVENAME  name for new pdb file (defaults: "gopt" or base name of specified XYZ file)
 ```
 If making only final frame, structures are saved as `[name].pdb`. If option for -frame is "all" or an integer, file(s) will be called `[name].f[num].pdb`.
-

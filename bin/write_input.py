@@ -20,6 +20,21 @@ def system_run(cmd):
         print('failed to run:')
         print(cmd)
         sys.exit()
+
+
+def _rinrus_root():
+    env_home = os.environ.get("RINRUS_HOME")
+    if env_home:
+        return Path(env_home).expanduser()
+    try:
+        from rinrus.paths import rinrus_home
+        return rinrus_home()
+    except Exception:
+        return Path(__file__).parents[1]
+
+
+def _gopt_to_pdb_path():
+    return _rinrus_root() / "bin" / "gopt_to_pdb.py"
  
 ### copy h-added pdb xyz and other information into tmppdb ###
 def pdb_after_addh(tmppdb,newpdb):
@@ -85,7 +100,8 @@ def gen_pdbfiles(wdir,step,tmppdb):
     else:
         system_run('mkdir %s'%new_dir)
     os.chdir(new_dir)
-    system_run('python3 $HOME/git/RINRUS/bin/gopt_to_pdb.py -p %s -o %s/step-%s-out -f -1'%(tmppdb,wdir,step))
+    gopt = _gopt_to_pdb_path()
+    system_run('%s %s -p %s -o %s/step-%s-out -f -1' % (sys.executable, gopt, tmppdb, wdir, step))
     os.chdir('%s'%wdir)
     pdb_name = []
     for pdbf in glob('%s/*.pdb'%new_dir):
@@ -212,7 +228,7 @@ if __name__ == '__main__':
 
     if int_tmp == None or int_tmp == '':
         #tmpltdir = Path.home() / 'git' / 'RINRUS' / 'template_files'
-        tmpltdir = Path(__file__).parents[1] / 'template_files'
+        tmpltdir = _rinrus_root() / 'template_files'
         int_tmp = tmpltdir / f'{ifmat}_input_template.txt'
         print("Using default input template: "+str(int_tmp))
 
@@ -231,4 +247,3 @@ if __name__ == '__main__':
         write_psi4_fsapt_input('%s/%s'%(wdir,inp_name),int_tmp,charge,multi,pic_atom,tot_charge,res_count,seed)
     else:
         print("ERROR: 'format' not set. Please provide an input format for your calculations!")
-

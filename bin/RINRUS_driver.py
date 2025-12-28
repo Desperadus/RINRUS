@@ -55,12 +55,22 @@ resopts = ['seed','dist_satom','must_add','unfrozen','model_prot_ignore_ids','mo
 def log_header(year):
     gitpath = str(Path(__file__).resolve().parents[1])
     pwd = os.getcwd()
-    gitver = subprocess.run(f"cd {gitpath}; git show -s --pretty='format:%h %cd' --date=format-local:'%Y-%m-%d %H:%M'; cd {pwd}",shell=True,stdout=PIPE,stderr=STDOUT,universal_newlines=True)
+    gitver = subprocess.run(
+        f"cd {gitpath}; git show -s --pretty='format:%h %cd' --date=format-local:'%Y-%m-%d %H:%M'; cd {pwd}",
+        shell=True,
+        stdout=PIPE,
+        stderr=STDOUT,
+        universal_newlines=True,
+    )
     gitver = gitver.stdout.split()
+    if len(gitver) >= 3:
+        githash, gitdate, gittime = gitver[0], gitver[1], gitver[2]
+    else:
+        githash, gitdate, gittime = "unknown", "unknown", "unknown"
     headtxt = ('--------------------------------------------------------------------------------------\n'
     '              RINRUS: The Residue Interaction Network ResidUe Selector                \n'
     '--------------------------------------------------------------------------------------\n'
-    f'(C) 2018-{year}. Using version {gitver[0]}, published on github {gitver[1]} at {gitver[2]}.        \n'
+    f'(C) 2018-{year}. Using version {githash}, published on github {gitdate} at {gittime}.        \n'
     'Developed in the group of Prof. Nathan DeYonker at the University of Memphis, TN USA. \n'
     'Contributors: Q. Cheng, N. DeYonker, D. Wappett, T. Summers, D. Agbaglo, T. Suhagia,  \n'
     '    T. Santaloci, J. Bachega.                                                         \n'
@@ -71,7 +81,7 @@ def log_header(year):
     clbanner = ('--------------------------------------------------------------------------------------\n'
     '           Running RINRUS: The Residue Interaction Network ResidUe Selector           \n'
     'Developed in the group of Prof. Nathan DeYonker at the University of Memphis, TN USA. \n'
-    f'(C) 2018-{year}. Using version {gitver[0]}, published on github {gitver[1]} at {gitver[2]}.        \n'
+    f'(C) 2018-{year}. Using version {githash}, published on github {gitdate} at {gittime}.        \n'
     '--------------------------------------------------------------------------------------\n')
     return headtxt,clbanner
 
@@ -396,7 +406,7 @@ def run_rinrus_driver(inpfile,scriptpath):
     if 'protonate_initial' in checked_dict.keys() and checked_dict['protonate_initial']:
         logger.info('PROTONATION OF INITIAL PDB:')
         mod_pdb = run_reduce(checked_dict['pdb'],logger,checked_dict['path_to_scripts'])
-        checked_dict['pdb'] = modpdb
+        checked_dict['pdb'] = mod_pdb
         logger.info('section done\n\n')
 
 
@@ -424,7 +434,14 @@ def run_rinrus_driver(inpfile,scriptpath):
             checked_dict['dist_type'] = input("Distance type not specified in input file: select closest or avg or mass \n")
             logger.info('Command line dist_type input: '+ str(checked_dict['dist_type']))
         select_by_distance(checked_dict,logger)
-        selfile = 'res_atoms_by_FG.dat'
+        if os.path.exists('res_atoms_by_FG.dat'):
+            selfile = 'res_atoms_by_FG.dat'
+        elif os.path.exists('res_atoms.dat'):
+            selfile = 'res_atoms.dat'
+        else:
+            logger.info('Distance selection did not create a res_atoms file. Quitting RINRUS')
+            print('Distance selection did not create a res_atoms file. Quitting RINRUS')
+            sys.exit()
     elif checked_dict['rin_program'].lower() == 'manual':
         if checked_dict['res_atoms_file']:
             selfile = checked_dict['res_atoms_file']
