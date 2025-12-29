@@ -86,6 +86,17 @@ Quick start with the CLI (no `rinrus.inp` file needed):
 rinrus driver --pdb 3bwm_h.pdb --seed A:300,A:301,A:302 --rin-program probe --model max --qm-input-format gaussian
 ```
 
+Auto-select seed residues around a ligand file (SDF/MOL/PDB):
+```bash
+rinrus driver --pdb protein.pdb --ligand ligand.sdf --ligand-cutoff 4.0 --rin-program distance --model max
+```
+
+Use pdb2pqr for pH-specific protonation of the initial PDB (trimmed models inherit this):
+```bash
+rinrus driver --pdb protein.pdb --seed A:300 --rin-program distance --model max --ph 7.0
+```
+With `--ph`, RINRUS will add caps to trimmed termini using PyMOL but will not re-protonate the whole model.
+
 Full usage instructions are described in [bin/](bin/README.md).
 
 

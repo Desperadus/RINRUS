@@ -13,6 +13,13 @@ The driver runs the entire RINRUS model building procedure from initial PDB stru
 # Usage of the RINRUS driver
 rinrus driver --pdb PDB.pdb --seed A:300,A:301,A:302 --rin-program probe --model max --qm-input-format gaussian
 
+# Auto-select seed residues around a ligand file (SDF/MOL/PDB)
+rinrus driver --pdb PDB.pdb --ligand ligand.sdf --ligand-cutoff 4.0 --rin-program distance --model max
+
+# Use pdb2pqr for pH-specific protonation of the initial PDB
+rinrus driver --pdb PDB.pdb --seed A:300 --rin-program distance --model max --ph 7.0
+With `--ph`, RINRUS will add caps to trimmed termini using PyMOL but will not re-protonate the whole model.
+
 # Or use an input file
 rinrus driver -i rinrus.inp
 

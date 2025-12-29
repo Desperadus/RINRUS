@@ -10,6 +10,125 @@ from pathlib import Path
 from rinrus import paths
 
 
+def _read_sdf_coords(path: Path) -> list[tuple[float, float, float]]:
+    lines = path.read_text().splitlines()
+    if len(lines) < 4:
+        raise ValueError(f"Invalid SDF file: {path}")
+    counts = lines[3]
+    natoms = None
+    try:
+        natoms = int(counts[0:3])
+    except ValueError:
+        tokens = counts.split()
+        if tokens and tokens[0].isdigit():
+            natoms = int(tokens[0])
+    if natoms is None or natoms <= 0:
+        raise ValueError(f"Unable to read atom count from SDF: {path}")
+    start = 4
+    coords: list[tuple[float, float, float]] = []
+    for i in range(natoms):
+        line = lines[start + i]
+        tokens = line.split()
+        if len(tokens) < 3:
+            raise ValueError(f"Invalid atom line in SDF: {path}")
+        coords.append((float(tokens[0]), float(tokens[1]), float(tokens[2])))
+    return coords
+
+
+def _read_pdb_coords(path: Path) -> list[tuple[float, float, float]]:
+    coords: list[tuple[float, float, float]] = []
+    for line in path.read_text().splitlines():
+        record = line[:6]
+        if record not in ("ATOM  ", "HETATM"):
+            continue
+        try:
+            x = float(line[30:38])
+            y = float(line[38:46])
+            z = float(line[46:54])
+        except ValueError:
+            continue
+        coords.append((x, y, z))
+    return coords
+
+
+def _read_ligand_coords(path: Path) -> list[tuple[float, float, float]]:
+    suffix = path.suffix.lower()
+    if suffix in (".sdf", ".mol"):
+        return _read_sdf_coords(path)
+    if suffix == ".pdb":
+        return _read_pdb_coords(path)
+    raise ValueError(f"Unsupported ligand format: {path}")
+
+
+def _read_pdb_atoms(path: Path, include_hetatm: bool) -> list[tuple[str, int, str, float, float, float]]:
+    atoms: list[tuple[str, int, str, float, float, float]] = []
+    for line in path.read_text().splitlines():
+        record = line[:6]
+        if record == "HETATM" and not include_hetatm:
+            continue
+        if record not in ("ATOM  ", "HETATM"):
+            continue
+        resn = line[17:20].strip()
+        if resn in ("HOH", "WAT", "H2O"):
+            continue
+        chain = line[21].strip()
+        try:
+            resi = int(line[22:26])
+            x = float(line[30:38])
+            y = float(line[38:46])
+            z = float(line[46:54])
+        except ValueError:
+            continue
+        atoms.append((chain, resi, resn, x, y, z))
+    return atoms
+
+
+def _format_seed(residues: list[tuple[str, int]]) -> str:
+    parts = []
+    for chain, resi in residues:
+        parts.append(f"{chain}:{resi}" if chain else f":{resi}")
+    return ",".join(parts)
+
+
+def _merge_seed_strings(existing: str, extra: str) -> str:
+    def _split(seed: str) -> list[str]:
+        return [s for s in seed.replace(" ", "").split(",") if s]
+
+    seen = set()
+    merged: list[str] = []
+    for item in _split(existing) + _split(extra):
+        if item not in seen:
+            seen.add(item)
+            merged.append(item)
+    return ",".join(merged)
+
+
+def _select_seed_from_ligand(
+    pdb_path: Path, ligand_path: Path, cutoff: float, include_hetatm: bool
+) -> str:
+    ligand_coords = _read_ligand_coords(ligand_path)
+    if not ligand_coords:
+        raise ValueError(f"No coordinates found in ligand file: {ligand_path}")
+    pdb_atoms = _read_pdb_atoms(pdb_path, include_hetatm=include_hetatm)
+    if not pdb_atoms:
+        raise ValueError(f"No atoms found in PDB file: {pdb_path}")
+
+    cutoff_sq = cutoff * cutoff
+    selected = set()
+    for chain, resi, _resn, x, y, z in pdb_atoms:
+        for lx, ly, lz in ligand_coords:
+            dx = x - lx
+            dy = y - ly
+            dz = z - lz
+            if (dx * dx + dy * dy + dz * dz) <= cutoff_sq:
+                selected.add((chain, resi))
+                break
+    if not selected:
+        raise ValueError("No residues found within cutoff of ligand")
+    residues = sorted(selected, key=lambda item: (item[0], item[1]))
+    return _format_seed(residues)
+
+
 def _append_env_path(env: dict, key: str, value: Path) -> None:
     value_str = str(value)
     current = env.get(key, "")
@@ -56,6 +175,8 @@ def _run_driver(args: argparse.Namespace) -> int:
     env = _runtime_env(bin_path, lib3_path, home_path)
 
     if args.driver_input:
+        if args.ligand:
+            raise ValueError("--ligand cannot be used with --input")
         driver_input = Path(args.driver_input)
         if not driver_input.is_file():
             raise FileNotFoundError(f"Driver input file not found: {driver_input}")
@@ -84,8 +205,24 @@ def _run_driver(args: argparse.Namespace) -> int:
         options["seed_charge"] = str(args.seed_charge)
     if args.multiplicity is not None:
         options["multiplicity"] = str(args.multiplicity)
+    if args.ph is not None:
+        options["model_prot_ph"] = str(args.ph)
     if args.path_to_scripts:
         options["path_to_scripts"] = args.path_to_scripts
+
+    if args.ligand:
+        if "pdb" not in options:
+            raise ValueError("--ligand requires --pdb")
+        ligand_seed = _select_seed_from_ligand(
+            Path(options["pdb"]),
+            Path(args.ligand),
+            args.ligand_cutoff,
+            args.ligand_include_hetatm,
+        )
+        if "seed" in options:
+            options["seed"] = _merge_seed_strings(options["seed"], ligand_seed)
+        else:
+            options["seed"] = ligand_seed
 
     missing = [k for k in ("pdb", "seed", "rin_program", "model") if k not in options]
     if missing:
@@ -131,11 +268,19 @@ def main() -> None:
     driver.add_argument("-i", "--input", dest="driver_input", help="Driver input file")
     driver.add_argument("--pdb", help="Input PDB filename")
     driver.add_argument("--seed", help="Seed fragment(s), e.g. A:300,A:301")
+    driver.add_argument("--ligand", help="Ligand file (SDF/MOL/PDB) used to auto-select seed residues")
+    driver.add_argument("--ligand-cutoff", type=float, default=4.0, help="Ligand contact cutoff in Angstrom")
+    driver.add_argument(
+        "--ligand-include-hetatm",
+        action="store_true",
+        help="Include HETATM residues as potential seeds",
+    )
     driver.add_argument("--rin-program", dest="rin_program", help="probe, arpeggio, distance, or manual")
     driver.add_argument("--model", help="all, max, maximal, or a number")
     driver.add_argument("--qm-input-format", dest="qm_input_format", help="gaussian, orca, qchem, gau-xtb, psi4-fsapt")
     driver.add_argument("--seed-charge", dest="seed_charge", type=int, help="Seed charge")
     driver.add_argument("--multiplicity", type=int, help="Spin multiplicity")
+    driver.add_argument("--ph", type=float, help="Use pdb2pqr to protonate models at this pH")
     driver.add_argument("--path-to-scripts", dest="path_to_scripts", help="Override bin directory path")
     driver.add_argument(
         "--set",

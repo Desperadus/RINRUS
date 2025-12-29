@@ -33,10 +33,12 @@ parser.add_argument("-pdb", nargs="+")
 parser.add_argument("-ignore_ids")
 parser.add_argument("-ignore_atoms")
 parser.add_argument("-ignore_atnames")
+parser.add_argument("-only_ids")
 args = parser.parse_args()
 ignoreid = args.ignore_ids
 ignoreatom = args.ignore_atoms
 ignoreatname = args.ignore_atnames
+onlyid = args.only_ids
 
 # Process ignore ids and atoms
 notres = ""
@@ -59,6 +61,20 @@ if ignoreatom != None and ignoreatom != '' and ignoreatom != ' ':
             ats += f" or name {a}"
         res = f" and not (chain {res_id[0]} and resi {int(res_id[1])} and ({ats}))"
         notats += res
+
+onlyres = ""
+if onlyid != None and onlyid != '' and onlyid != ' ':
+    onlylist = []
+    onlyid = onlyid.split(',')
+    for i in onlyid:
+        res_id = i.split(':')
+        resi = int(res_id[1])
+        if res_id[0]:
+            onlylist.append(f"(chain {res_id[0]} and resi {resi})")
+        else:
+            onlylist.append(f"(resi {resi})")
+    if onlylist:
+        onlyres = " and (" + " or ".join(onlylist) + ")"
         
 notatn = "name NH1 or name NH2"
 if ignoreatname != None and ignoreatname != '' and ignoreatname != ' ':
@@ -72,7 +88,7 @@ with open("log.pml", "w") as logf:
         name = os.path.splitext(pdbfilename)[0]
         outputfilename = f"{name}_h.pdb"
         logf.write(f"load {pdbfilename}\n")
-        logf.write(f'cmd.select("sel","{name}{notres}{notats} and not ({notatn})")\n')
+        logf.write(f'cmd.select("sel","{name}{onlyres}{notres}{notats} and not ({notatn})")\n')
         logf.write('cmd.h_add("sel")\n')
         logf.write(f'cmd.save("./{outputfilename}")\n')
 

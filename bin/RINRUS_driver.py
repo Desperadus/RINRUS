@@ -39,6 +39,7 @@ opts = {'path_to_scripts': ['Path to the RINRUS scripts bin directory','dir path
         'model_prot_ignore_ids': ['Residues avoided in model protonation','ch:ID[,ch:ID,...]'],
         'model_prot_ignore_atoms': ['Specific atoms avoided in model protonation','ch:ID:atom[,ch:ID:atom,...]'],
         'model_prot_ignore_atnames': ['Atom types avoided in model protonation','atom[,atom,...]'],
+        'model_prot_ph': ['Protonate models with pdb2pqr at pH','number'],
         'qm_input_format': ['Format for QM input file(s)', 'gaussian OR orca OR qchem OR gau-xtb OR psi4-fsapt OR none'],
         'qm_input_template': ['Specified QM input template','filename    (only used if qm_input_format defined and not none)'],
 	'gaussian_basis_intmp': ['Source of basis sets for Gaussian input', 'true OR false    (only used if qm_input_format = gaussian)'], 
@@ -207,6 +208,67 @@ def run_reduce(pdb,logger,path_to_scripts):
     mod_pdb = str(pdb_2)+'_h.pdb'
     return mod_pdb
 
+def run_pdb2pqr(pdb,logger,ph):
+    """
+    runs pdb2pqr with --with-ph and writes a protonated PDB and PQR
+    """
+    pdb2pqr = shutil.which('pdb2pqr')
+    if not pdb2pqr:
+        print('pdb2pqr not found in PATH. Please install pdb2pqr or adjust PATH.')
+        logger.info('pdb2pqr not found in PATH. Quitting RINRUS')
+        sys.exit()
+    try:
+        ph = float(ph)
+    except ValueError:
+        print('Invalid model_prot_ph value. Please provide a number.')
+        logger.info('Invalid model_prot_ph value. Quitting RINRUS')
+        sys.exit()
+    pdb_base = os.path.splitext(os.path.basename(pdb))[0]
+    out_pdb = f'{pdb_base}_h.pdb'
+    out_pqr = f'{pdb_base}.pqr'
+    log_name = f'{pdb_base}_pdb2pqr.log'
+    arg = [pdb2pqr, '--with-ph', str(ph), '--pdb-output', out_pdb, pdb, out_pqr]
+    result = subprocess.run(arg,stdout=PIPE,stderr=STDOUT,universal_newlines=True)
+    with open(log_name, 'w') as logf:
+        if result.stdout:
+            logf.write(result.stdout)
+    if result.returncode != 0 or not os.path.exists(out_pdb):
+        print('pdb2pqr failed. See ' + log_name)
+        logger.info('pdb2pqr failed with output: \n' + str(result.stdout))
+        sys.exit()
+    logger.info('pdb2pqr run as: '+ str(' '.join(arg)))
+    return out_pdb
+
+
+def cap_ids_from_pdb(pdb_path):
+    residues = {}
+    with open(pdb_path, 'r') as handle:
+        for line in handle:
+            record = line[:6]
+            if record != 'ATOM  ':
+                continue
+            chain = line[21].strip()
+            try:
+                resi = int(line[22:26])
+            except ValueError:
+                continue
+            residues.setdefault(chain, set()).add(resi)
+
+    cap_ids = set()
+    for chain, resis in residues.items():
+        if not resis:
+            continue
+        res_list = sorted(resis)
+        for idx, resi in enumerate(res_list):
+            prev_res = res_list[idx - 1] if idx > 0 else None
+            next_res = res_list[idx + 1] if idx + 1 < len(res_list) else None
+            if prev_res is None or prev_res != (resi - 1):
+                cap_ids.add((chain, resi))
+            if next_res is None or next_res != (resi + 1):
+                cap_ids.add((chain, resi))
+    cap_list = sorted(cap_ids, key=lambda item: (item[0], item[1]))
+    return ','.join([f'{c}:{r}' if c else f':{r}' for c, r in cap_list])
+
 def select_by_probe(pdb,seed,logger,path_to_scripts):
     """_summary_
     Hardcoded Flags:
@@ -329,20 +391,32 @@ def trim_model(checked_dict,model_num,selfile,logger):
     return
 
 def protonate_model(checked_dict,model_num,logger):
-    path = os.path.expanduser(checked_dict['path_to_scripts']+'pymol_protonate.py')
     name = 'res_' + str(model_num)+'.pdb'
-    arg= [sys.executable,path,'-pdb', name]
-    if 'model_prot_ignore_ids' in checked_dict.keys():
-        arg.append('-ignore_ids')
-        arg.append(checked_dict['model_prot_ignore_ids'])
-    if 'model_prot_ignore_atoms' in checked_dict.keys():
-        arg.append('-ignore_atoms')
-        arg.append(checked_dict['model_prot_ignore_atoms'])
-    if 'model_prot_ignore_atnames' in checked_dict.keys():
-        arg.append('-ignore_atnames')
-        arg.append(checked_dict['model_prot_ignore_atnames'])
-    out = subprocess.run(arg,stdout=PIPE,stderr=STDOUT,universal_newlines=True)
-    logger.info('Model protonation run as: '+ str(' '.join(arg[1:])))
+    if checked_dict.get('pdb2pqr_initial'):
+        out_name = f'res_{model_num}_h.pdb'
+        cap_ids = cap_ids_from_pdb(name)
+        if cap_ids:
+            path = os.path.expanduser(checked_dict['path_to_scripts']+'pymol_protonate.py')
+            arg= [sys.executable,path,'-pdb', name, '-only_ids', cap_ids]
+            out = subprocess.run(arg,stdout=PIPE,stderr=STDOUT,universal_newlines=True)
+            logger.info('Model protonation (caps only) run as: '+ str(' '.join(arg[1:])))
+        else:
+            shutil.copyfile(name, out_name)
+            logger.info('Model protonation skipped; copied '+ name +' to '+ out_name)
+    else:
+        path = os.path.expanduser(checked_dict['path_to_scripts']+'pymol_protonate.py')
+        arg= [sys.executable,path,'-pdb', name]
+        if 'model_prot_ignore_ids' in checked_dict.keys():
+            arg.append('-ignore_ids')
+            arg.append(checked_dict['model_prot_ignore_ids'])
+        if 'model_prot_ignore_atoms' in checked_dict.keys():
+            arg.append('-ignore_atoms')
+            arg.append(checked_dict['model_prot_ignore_atoms'])
+        if 'model_prot_ignore_atnames' in checked_dict.keys():
+            arg.append('-ignore_atnames')
+            arg.append(checked_dict['model_prot_ignore_atnames'])
+        out = subprocess.run(arg,stdout=PIPE,stderr=STDOUT,universal_newlines=True)
+        logger.info('Model protonation run as: '+ str(' '.join(arg[1:])))
     return
 
 def make_temp_pdb(model_num,path_to_scripts,logger):
@@ -403,7 +477,13 @@ def run_rinrus_driver(inpfile,scriptpath):
 
     
     ### INITIAL PROTONATION
-    if 'protonate_initial' in checked_dict.keys() and checked_dict['protonate_initial']:
+    if 'model_prot_ph' in checked_dict.keys():
+        logger.info('PROTONATION OF INITIAL PDB WITH PDB2PQR:')
+        mod_pdb = run_pdb2pqr(checked_dict['pdb'],logger,checked_dict['model_prot_ph'])
+        checked_dict['pdb'] = mod_pdb
+        checked_dict['pdb2pqr_initial'] = True
+        logger.info('section done\n\n')
+    elif 'protonate_initial' in checked_dict.keys() and checked_dict['protonate_initial']:
         logger.info('PROTONATION OF INITIAL PDB:')
         mod_pdb = run_reduce(checked_dict['pdb'],logger,checked_dict['path_to_scripts'])
         checked_dict['pdb'] = mod_pdb
@@ -430,7 +510,7 @@ def run_rinrus_driver(inpfile,scriptpath):
                 selfile = 'res_atoms_types.dat'
                 logger.info('Command line arpeggio_rank input: ' + arprank)
     elif checked_dict['rin_program'].lower() == 'distance':
-        if not checked_dict['dist_type']:
+        if 'dist_type' not in checked_dict.keys() or not checked_dict['dist_type']:
             checked_dict['dist_type'] = input("Distance type not specified in input file: select closest or avg or mass \n")
             logger.info('Command line dist_type input: '+ str(checked_dict['dist_type']))
         select_by_distance(checked_dict,logger)
@@ -499,7 +579,9 @@ def run_rinrus_driver(inpfile,scriptpath):
     checked_dict['model'] = model_num
     
     # check for protonation exclusions if not specified in input file
-    if not {'model_prot_ignore_ids', 'model_prot_ignore_atoms', 'model_prot_ignore_atnames'} & set(checked_dict.keys()):
+    if 'model_prot_ph' in checked_dict.keys():
+        logger.info('Model protonation set to pdb2pqr on initial PDB; skipping PyMOL ignore prompts')
+    elif not {'model_prot_ignore_ids', 'model_prot_ignore_atoms', 'model_prot_ignore_atnames'} & set(checked_dict.keys()):
         logger.info('No "model_prot_ignore..." options specified in input. Command line input requested')
         print(f'No "model_prot_ignore..." options specified in input. Warning: PyMOL may incorrectly change protonation of the ligand/non-canonical residues.')
         freezeinp = input('Exclude seed (S) or manually select exclusions (M) or continue anyway (): \n')
