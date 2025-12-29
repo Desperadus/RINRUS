@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -104,7 +106,7 @@ def _merge_seed_strings(existing: str, extra: str) -> str:
 
 
 def _select_seed_from_ligand(
-    pdb_path: Path, ligand_path: Path, cutoff: float, include_hetatm: bool
+    pdb_path: Path, ligand_path: Path, cutoff: float | None, include_hetatm: bool
 ) -> str:
     ligand_coords = _read_ligand_coords(ligand_path)
     if not ligand_coords:
@@ -113,6 +115,8 @@ def _select_seed_from_ligand(
     if not pdb_atoms:
         raise ValueError(f"No atoms found in PDB file: {pdb_path}")
 
+    if cutoff is None:
+        cutoff = 4.0
     cutoff_sq = cutoff * cutoff
     selected = set()
     for chain, resi, _resn, x, y, z in pdb_atoms:
@@ -210,6 +214,15 @@ def _run_driver(args: argparse.Namespace) -> int:
     if args.path_to_scripts:
         options["path_to_scripts"] = args.path_to_scripts
 
+    if args.auto is not None:
+        if not args.ligand:
+            raise ValueError("--auto requires --ligand")
+        options.setdefault("rin_program", "distance")
+        options.setdefault("model", "max")
+        options.setdefault("dist_type", "closest")
+        if args.ligand_cutoff is None:
+            args.ligand_cutoff = args.auto
+
     if args.ligand:
         if "pdb" not in options:
             raise ValueError("--ligand requires --pdb")
@@ -232,6 +245,32 @@ def _run_driver(args: argparse.Namespace) -> int:
     try:
         cmd = [sys.executable, str(bin_path / "RINRUS_driver.py"), "-i", str(driver_input)]
         result = subprocess.run(cmd, env=env)
+        if result.returncode == 0 and args.output:
+            output_path = Path(args.output)
+            if output_path.exists() and output_path.is_dir():
+                target_dir = output_path
+            else:
+                target_dir = output_path.parent if output_path.suffix else output_path
+            if not target_dir.exists():
+                raise FileNotFoundError(f"Output directory does not exist: {target_dir}")
+            candidates = []
+            for item in Path.cwd().iterdir():
+                if not item.is_file():
+                    continue
+                match = re.match(r"res_(\d+)_h\.pdb$", item.name)
+                if match:
+                    candidates.append((int(match.group(1)), item))
+            if not candidates:
+                raise FileNotFoundError("No res_*_h.pdb files found to copy")
+            candidates.sort(key=lambda entry: entry[0])
+            _, source = candidates[-1]
+            if output_path.exists() and output_path.is_dir():
+                dest = output_path / source.name
+            elif output_path.suffix:
+                dest = output_path
+            else:
+                dest = output_path / source.name
+            shutil.copyfile(source, dest)
         return result.returncode
     finally:
         try:
@@ -269,18 +308,20 @@ def main() -> None:
     driver.add_argument("--pdb", help="Input PDB filename")
     driver.add_argument("--seed", help="Seed fragment(s), e.g. A:300,A:301")
     driver.add_argument("--ligand", help="Ligand file (SDF/MOL/PDB) used to auto-select seed residues")
-    driver.add_argument("--ligand-cutoff", type=float, default=4.0, help="Ligand contact cutoff in Angstrom")
+    driver.add_argument("--ligand-cutoff", type=float, default=None, help="Ligand contact cutoff in Angstrom")
     driver.add_argument(
         "--ligand-include-hetatm",
         action="store_true",
         help="Include HETATM residues as potential seeds",
     )
+    driver.add_argument("--auto", type=float, help="Shortcut for ligand-driven run (sets cutoff/rin_program/model/dist_type)")
     driver.add_argument("--rin-program", dest="rin_program", help="probe, arpeggio, distance, or manual")
     driver.add_argument("--model", help="all, max, maximal, or a number")
     driver.add_argument("--qm-input-format", dest="qm_input_format", help="gaussian, orca, qchem, gau-xtb, psi4-fsapt")
     driver.add_argument("--seed-charge", dest="seed_charge", type=int, help="Seed charge")
     driver.add_argument("--multiplicity", type=int, help="Spin multiplicity")
     driver.add_argument("--ph", type=float, help="Use pdb2pqr to protonate models at this pH")
+    driver.add_argument("--output", help="Copy final res_<N>_h.pdb to this path")
     driver.add_argument("--path-to-scripts", dest="path_to_scripts", help="Override bin directory path")
     driver.add_argument(
         "--set",

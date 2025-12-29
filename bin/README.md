@@ -15,10 +15,14 @@ rinrus driver --pdb PDB.pdb --seed A:300,A:301,A:302 --rin-program probe --model
 
 # Auto-select seed residues around a ligand file (SDF/MOL/PDB)
 rinrus driver --pdb PDB.pdb --ligand ligand.sdf --ligand-cutoff 4.0 --rin-program distance --model max
+rinrus driver --pdb PDB.pdb --ligand ligand.sdf --auto 4.0
 
 # Use pdb2pqr for pH-specific protonation of the initial PDB
 rinrus driver --pdb PDB.pdb --seed A:300 --rin-program distance --model max --ph 7.0
 With `--ph`, RINRUS will add caps to trimmed termini using PyMOL but will not re-protonate the whole model.
+
+# Copy the final protonated model to a specific path
+rinrus driver --pdb PDB.pdb --seed A:300 --rin-program distance --model max --output results/model_h.pdb
 
 # Or use an input file
 rinrus driver -i rinrus.inp
