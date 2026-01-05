@@ -20,7 +20,7 @@ Prof. Nathan DeYonker, Department of Chemistry, University of Memphis at ndyonke
 
 Recommended (mamba):
 ```bash
-git clone https://github.com/natedey/RINRUS.git
+git clone https://github.com/Desperadus/RINRUS.git
 cd RINRUS
 mamba env create -f env.yml
 mamba activate rinrus
